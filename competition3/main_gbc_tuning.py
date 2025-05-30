@@ -1,13 +1,11 @@
 import pandas as pd
 import numpy as np
 from sklearn.base import clone
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 from xgboost import XGBClassifier
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
-from sklearn.feature_selection import SelectFromModel
-from sklearn.model_selection import train_test_split, StratifiedKFold
-
+from sklearn.metrics import balanced_accuracy_score
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 # Data cleaning function
 def clean_data(df):
@@ -56,44 +54,45 @@ X_test = X_test.fillna(0)
 le = LabelEncoder()
 y_train_encoded = le.fit_transform(y_train)
 
-models = {
-    "GradientBoosting": GradientBoostingClassifier(n_estimators=2000, learning_rate=0.05),
-    "XGBoost": XGBClassifier(eval_metric='mlogloss', random_state=42, n_jobs=-3, max_depth=4)
-}
-# feature selection
-# print(f"Before applying feature selection {X_train.shape[1]}")
-# fs_model = XGBClassifier(eval_metric='mlogloss', random_state=42, n_jobs=-1)
-# fs_model.fit(X_train, y_train_encoded)
-# selector = SelectFromModel(fs_model, threshold='median', prefit=True)  # Can change to 'mean' or a float
+# Split for validation
+X_train_func, X_val, y_train_func, y_val = train_test_split(X_train, y_train_encoded, test_size=0.2, random_state=42)
 
-# X_train = selector.transform(X_train)
-# X_test = selector.transform(X_test)
-# print(f"Reduced to {X_train.shape[1]} features after selection.")
-X_train_func, X_val, y_train_func, y_val = train_test_split(X_train, y_train_encoded, test_size=0.2)
-best_model = ""
-best_score = -np.inf
-print("-----------------------------")
-for clf_name, clf in models.items():
-    cloned_clf = clone(clf)
-    cloned_clf.fit(X_train_func, y_train_func)
-    print("*************************")
-    print(clf_name)
-    score = balanced_accuracy_score(y_val, cloned_clf.predict(X_val))
-    print(f"train score: {balanced_accuracy_score(y_train_func, cloned_clf.predict(X_train_func))}")
-    print(f"test score: {score}")
-    print("*************************")
-    if(score > best_score):
-        best_model = clf_name
-        best_score = score
-print("-----------------------------")
-print(f"The best model is: {best_model}, the best score is: {best_score}")
-model = models[best_model]
-model.fit(X_train, y_train_encoded)
-print('train',balanced_accuracy_score(y_train_encoded, cloned_clf.predict(X_train)))
-print('test',balanced_accuracy_score(y_val, model.predict(X_val)))
+# Hyperparameter tuning for GradientBoostingClassifier
+param_dist = {
+    'n_estimators': [100, 500, 1000, 2000],
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+    'max_depth': [2, 3, 4, 5, 6],
+    'subsample': [0.6, 0.8, 1.0],
+    'min_samples_split': [2, 5, 10]
+}
+
+gbc = GradientBoostingClassifier(random_state=42)
+random_search = RandomizedSearchCV(
+    gbc,
+    param_distributions=param_dist,
+    n_iter=20,
+    scoring='balanced_accuracy',
+    n_jobs=-1,
+    cv=3,
+    verbose=2,
+    random_state=42
+)
+
+random_search.fit(X_train_func, y_train_func)
+print("Best parameters found:", random_search.best_params_)
+print("Best balanced accuracy (CV):", random_search.best_score_)
+
+# Evaluate on validation set
+best_gbc = random_search.best_estimator_
+val_pred = best_gbc.predict(X_val)
+val_score = balanced_accuracy_score(y_val, val_pred)
+print("Validation balanced accuracy (holdout):", val_score)
+
+# Retrain on full training data
+best_gbc.fit(X_train, y_train_encoded)
 
 # Predict probabilities
-probs = model.predict_proba(X_test)
+probs = best_gbc.predict_proba(X_test)
 class_order = le.classes_
 
 # Prepare submission DataFrame
@@ -112,4 +111,4 @@ for col in ['Status_C', 'Status_CL', 'Status_D']:
     submission[col] = submission[col].clip(eps, 1 - eps)
 
 # Save to CSV
-submission.to_csv('submission.csv', index=False)
+submission.to_csv('submission.csv', index=False) 
