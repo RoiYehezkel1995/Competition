@@ -57,18 +57,19 @@ y_train_encoded = le.fit_transform(y_train)
 # Split for validation
 X_train_func, X_val, y_train_func, y_val = train_test_split(X_train, y_train_encoded, test_size=0.2, random_state=42)
 
-# Hyperparameter tuning for GradientBoostingClassifier
+# Hyperparameter tuning for XGBClassifier
 param_dist = {
     'n_estimators': [100, 500, 1000, 2000],
     'learning_rate': [0.01, 0.05, 0.1, 0.2],
     'max_depth': [2, 3, 4, 5, 6],
-    'subsample': [0.6, 0.7, 0.8],
-    'min_samples_split': [2, 5, 10]
+    'subsample': [0.6, 0.8, 1.0],
+    'colsample_bytree': [0.6, 0.8, 1.0],
+    'gamma': [0, 0.1, 0.2, 0.5]
 }
 
-gbc = GradientBoostingClassifier(random_state=42)
+xgb = XGBClassifier(eval_metric='mlogloss', random_state=42, n_jobs=-1, use_label_encoder=False)
 random_search = RandomizedSearchCV(
-    gbc,
+    xgb,
     param_distributions=param_dist,
     n_iter=20,
     scoring='balanced_accuracy',
@@ -83,16 +84,16 @@ print("Best parameters found:", random_search.best_params_)
 print("Best balanced accuracy (CV):", random_search.best_score_)
 
 # Evaluate on validation set
-best_gbc = random_search.best_estimator_
-val_pred = best_gbc.predict(X_val)
+best_xgb = random_search.best_estimator_
+val_pred = best_xgb.predict(X_val)
 val_score = balanced_accuracy_score(y_val, val_pred)
 print("Validation balanced accuracy (holdout):", val_score)
 
 # Retrain on full training data
-best_gbc.fit(X_train, y_train_encoded)
+best_xgb.fit(X_train, y_train_encoded)
 
 # Predict probabilities
-probs = best_gbc.predict_proba(X_test)
+probs = best_xgb.predict_proba(X_test)
 class_order = le.classes_
 
 # Prepare submission DataFrame
